@@ -1,5 +1,5 @@
 name: hermes-systemone
 kind: model-provider
-version: 0.1.0
-description: System 1 wire as a first-class Hermes provider
+version: 0.2.0
+description: System One provider plugin for Hermes Agent
 author: AokiApp
