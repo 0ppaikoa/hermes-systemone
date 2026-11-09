@@ -35,9 +35,22 @@ API_PATH = "/systemone"
 
 
 def _v1_base(base: Any) -> str:
-    """Normalize base_url to end with /v1: `https://example.com` -> `https://example.com/v1`."""
-    base = str(base or "").strip().rstrip("/")
+    """`_norm_url` plus the `/v1` tail: `https://example.com` -> `https://example.com/v1`."""
+    base = _norm_url(base)
     return base if base.endswith("/v1") else base + "/v1"
+
+
+def _norm_url(raw: Any) -> str:
+    """Normalize an endpoint URL: lowercase scheme, host, and path; drop query and fragment."""
+    from urllib.parse import urlsplit
+
+    url_str = str(raw or "").strip()
+    if not url_str:
+        return ""
+    parts = urlsplit(url_str)
+    rebuilt = f"{parts.scheme.lower()}://{parts.netloc.lower()}{parts.path.lower()}"
+    return rebuilt.rstrip("/")
+
 
 # --- settings ----------------------------------------------------------------
 
@@ -82,8 +95,6 @@ def _require_settings(settings: dict[str, Any], *, part: str) -> None:
 
 
 # --- state -------------------------------------------------------------------
-
-_ROLES = ("system", "user", "assistant", "tool", "reasoning")
 
 
 def _escape(text: Any) -> str:
@@ -144,7 +155,8 @@ def _format_state_string(messages: list[dict[str, Any]], includes: dict[str, Any
 
     The latest user message is always included, regardless of `includes`. Tool
     calls are rendered once, on the tool result entry (name + JSON argument and
-    JSON value), so the call is never written twice.
+    JSON value), so the call is never written twice. The `developer` role counts
+    as part of `system` (its settings key) and renders on a `system:` line.
     """
     call_map = _tool_call_index(messages)
     forced = _last_user_index(messages)
@@ -167,23 +179,26 @@ def _format_state_string(messages: list[dict[str, Any]], includes: dict[str, Any
                 continue
             name, args = call_map.get(str(m.get("tool_call_id") or ""), ("", ""))
             lines.append(f"tool: {name}({args}) => {_json_value(m.get('content'))}")
-        elif role in ("system", "user"):
-            if not includes.get(role) and i != forced:
+        elif role in ("system", "developer", "user"):
+            if not includes.get("system" if role != "user" else "user") and i != forced:
                 continue
+            label = "system" if role != "user" else "user"
             text = _content_text(m.get("content"))
             if text:
-                lines.append(f"{role}: {_escape(text)}")
+                lines.append(f"{label}: {_escape(text)}")
     return "\n".join(lines)
 
 
 def _format_state_array(messages: list[dict[str, Any]], includes: dict[str, Any]) -> list[dict[str, Any]]:
     """OpenAI-shaped messages -> the entries selected by `includes`, as a list. Design doc 4.2.
 
-    Role labels are required: the array carries them. The latest user message is
-    always included, regardless of `includes`.
+    Role labels are required: the array carries them (a `developer` entry keeps
+    its role). The latest user message is always included, regardless of
+    `includes`; the `developer` role counts as part of `system`.
     """
     out: list[dict[str, Any]] = []
-    role_of = {"system": "system", "user": "user", "assistant": "assistant", "tool": "tool"}
+    include_key = {"system": "system", "developer": "system", "user": "user",
+                   "assistant": "assistant", "tool": "tool"}
     forced = _last_user_index(messages)
     for i, m in enumerate(messages):
         if not isinstance(m, dict):
@@ -193,7 +208,8 @@ def _format_state_array(messages: list[dict[str, Any]], includes: dict[str, Any]
             reasoning = m.get("reasoning_content") or m.get("reasoning")
             if reasoning and includes.get("reasoning"):
                 out.append({"role": "reasoning", "content": _content_text(reasoning)})
-        if role in role_of and (includes.get(role) or i == forced):
+        key = include_key.get(role)
+        if key and (includes.get(key) or i == forced):
             entry: dict[str, Any] = {"role": role, "content": m.get("content")}
             if role == "assistant" and m.get("tool_calls"):
                 entry["tool_calls"] = m.get("tool_calls")
@@ -256,6 +272,16 @@ def _eval_expression(expression: str, answers: dict[str, Any]) -> Any:
 
 _MESSAGE_KEYS = ("content", "tool_calls", "reasoning", "finish_reason")
 
+_FINISH_REASONS = ("stop", "tool_calls", "length", "content_filter")
+
+
+def _int_or_zero(value: Any) -> int:
+    """Non-negative int with a safe fallback (provider usage numbers may be junk)."""
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return 0
+
 
 def _assemble(expression_result: Any, answers: dict[str, Any], usage: dict[str, Any], model: str) -> SimpleNamespace:
     """Projection result (dict or str) -> OpenAI-shaped response. Design doc 5.2 / 5.3."""
@@ -278,8 +304,9 @@ def _assemble(expression_result: Any, answers: dict[str, Any], usage: dict[str, 
             raise RuntimeError("SystemOne provider: tool_calls must be a list.")
         tool_calls = list(raw_calls or [])
         reasoning = expression_result.get("reasoning")
-        if expression_result.get("finish_reason"):
-            finish_reason = str(expression_result["finish_reason"])
+        candidate = str(expression_result.get("finish_reason") or "")
+        if candidate in _FINISH_REASONS:
+            finish_reason = candidate
     else:
         raise RuntimeError(
             "SystemOne provider: the projection expression must return a str or a dict "
@@ -303,8 +330,9 @@ def _assemble(expression_result: Any, answers: dict[str, Any], usage: dict[str, 
             )
         )
 
-    input_tokens = int(usage.get("input_tokens") or 0)
-    output_tokens = int(usage.get("output_tokens") or 0)
+    usage = usage if isinstance(usage, dict) else {}
+    input_tokens = _int_or_zero(usage.get("input_tokens"))
+    output_tokens = _int_or_zero(usage.get("output_tokens"))
     usage_obj = SimpleNamespace(
         prompt_tokens=input_tokens,
         completion_tokens=output_tokens,
@@ -332,7 +360,10 @@ class SystemOneClient:
 
     Hermes sees the usual `client.chat.completions.create(**kwargs)` surface;
     state assembly, question build, and answer-to-message conversion happen
-    inside this client.
+    inside this client. Auxiliary tasks (compression, titles) run through the
+    same client. Errors are plain RuntimeError (not Hermes ProviderError
+    subclasses); the auxiliary resolver catches them, and the main loop
+    surfaces them as-is.
     """
 
     HERMES_SKIP_TRANSPORT_WRAP = True
@@ -343,8 +374,9 @@ class SystemOneClient:
         import httpx
 
         self.api_key = api_key
-        self.base_url = str(base_url or "").strip().rstrip("/")
+        self.base_url = _norm_url(base_url)
         self._settings = settings or {}
+        self._default_headers = dict(default_headers or {})
         self.is_closed = False
         self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
         self._http = http_client or httpx.Client(timeout=timeout or 120.0)
@@ -357,6 +389,12 @@ class SystemOneClient:
                 "Set providers.<name>.base_url to the API endpoint."
             )
         return _v1_base(base) + API_PATH
+
+    def _headers(self) -> dict[str, str]:
+        headers = {"Content-Type": "application/json", **self._default_headers}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        return headers
 
     def close(self) -> None:
         self.is_closed = True
@@ -376,14 +414,19 @@ class SystemOneClient:
         questions = settings.get("questions") or {}
         state = _format_state(list(messages or []), settings)
         url = self._url()
-        headers = {"Content-Type": "application/json", "Authorization": f"Bearer {self.api_key}"}
         response = self._http.post(url, json={"model": model, "state": state, "questions": questions},
-                                   headers=headers)
+                                   headers=self._headers())
         if response.status_code != 200:
             raise RuntimeError(
                 f"SystemOne API error: HTTP {response.status_code}: {response.text[:300]}"
             )
-        data = response.json()
+        try:
+            data = response.json()
+        except ValueError as exc:
+            raise RuntimeError(
+                f"SystemOne API error: HTTP {response.status_code} returned a non-JSON body: "
+                f"{str(response.text or '')[:200]}"
+            ) from exc
         expression = (settings.get("response") or {}).get("expression")
         answers = data.get("answers") or {}
         result = _eval_expression(str(expression).strip(), answers)
@@ -485,10 +528,12 @@ def _settings_for_base_url(base_url: Any) -> dict[str, Any] | None:
     """Find the `providers:` entry whose URL matches and which declares
     `api_mode: systemone`, else None (no client override). Runs at create_client
     time, when hermes_cli is already loaded; no scan happens at import time.
+    URL comparison is normalized: scheme/host lowercased, query and fragment
+    dropped, so `HTTPS://…` and `…?x=1` still match.
     """
     from hermes_cli.config import load_config
 
-    url = str(base_url or "").strip().rstrip("/")
+    url = _norm_url(base_url)
     if not url:
         return None
     cfg = load_config() or {}
@@ -514,7 +559,8 @@ def _settings_for_base_url(base_url: Any) -> dict[str, Any] | None:
 
 
 def _entry_url(entry: dict[str, Any]) -> str:
-    url_str = str(entry.get("api") or entry.get("base_url") or entry.get("url") or "").strip().rstrip("/")
+    url_str = str(entry.get("api") or entry.get("base_url") or entry.get("url") or "").strip()
+    url_str = _norm_url(url_str)
     return url_str if url_str.endswith("/v1") else url_str + "/v1"
 
 
