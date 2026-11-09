@@ -71,6 +71,67 @@ def _settings_for_base_url(base_url: Any) -> dict[str, Any] | None:
     return None
 
 
+def _settings_for_provider_name(name: Any) -> dict[str, Any] | None:
+    """The `providers:<name>` entry, when it declares `api_mode: systemone`.
+
+    The auxiliary path resolves a task's provider by NAME, not by URL: a
+    registered profile is looked up in `PROVIDER_REGISTRY` and its
+    `create_client()` is called with the entry's own `api_key` / `base_url`.
+    Matching on the name keeps the two paths pointing at the same entry even
+    when several `providers:` entries share one endpoint.
+    """
+    from hermes_cli.config import load_config
+
+    key = str(name or "").strip()
+    if not key:
+        return None
+    entry = ((load_config() or {}).get("providers") or {}).get(key)
+    if not isinstance(entry, dict) or _entry_mode(entry) != "systemone":
+        return None
+    return entry
+
+
+def _entry_key_env(entry: dict[str, Any]) -> str:
+    return str(entry.get("key_env") or entry.get("api_key_env") or "").strip()
+
+
+def systemone_entries() -> dict[str, dict[str, Any]]:
+    """Every `providers:` entry that declares `api_mode: systemone`, keyed by name."""
+    from hermes_cli.config import load_config
+
+    cfg = load_config() or {}
+    entries = cfg.get("providers")
+    if not isinstance(entries, dict):
+        return {}
+    return {
+        str(key): entry
+        for key, entry in entries.items()
+        if isinstance(entry, dict) and _entry_mode(entry) == "systemone"
+    }
+
+
+def build_entry_profile(name: str, entry: dict[str, Any]) -> "SystemOneCustomProfile":
+    """A profile registered under the entry's own name, for the auxiliary path.
+
+    `env_vars` must not be empty: `PROVIDER_REGISTRY` — the table the auxiliary
+    resolver reads `auth_type` from — only holds providers that declare at least
+    one credential variable, so a profile with `env_vars=()` is invisible there
+    and the task falls through to the plain OpenAI client. The entry's `key_env`
+    is the honest value; the fallback name is only for entries that rely on an
+    inline `api_key`.
+    """
+    key_env = _entry_key_env(entry)
+    profile = SystemOneCustomProfile(
+        name=name,
+        aliases=(),
+        env_vars=(key_env,) if key_env else ("SYSTEMONE_API_KEY",),
+        base_url=str(entry.get("api") or entry.get("base_url") or entry.get("url") or ""),
+        auth_type="api_key",
+    )
+    profile.supports_streaming = False
+    return profile
+
+
 def _require_discover_models_off(settings: dict[str, Any], *, base_url: Any) -> None:
     """Refuse to build a client unless `discover_models: false` is set.
 
@@ -110,7 +171,13 @@ class SystemOneCustomProfile(CustomBaseProfile):
     supports_streaming = False
 
     def create_client(self, **client_kwargs: Any) -> Any:
-        settings = _settings_for_base_url(client_kwargs.get("base_url"))
+        # The auxiliary path calls this on a profile registered under the entry's
+        # own name, and passes that entry's api_key / base_url; the main loop
+        # reaches this same class through the "custom" profile with only a URL.
+        # Try the name first so both paths land on the same entry.
+        settings = _settings_for_provider_name(self.name)
+        if settings is None:
+            settings = _settings_for_base_url(client_kwargs.get("base_url"))
         if settings is None:
             return None
         _require_discover_models_off(settings, base_url=client_kwargs.get("base_url"))

@@ -88,6 +88,36 @@ that surface later as an unselectable model.
 More endpoints: add more entries. `api_mode: systemone` selects this protocol, so
 the plugin never changes.
 
+## Auxiliary tasks
+
+A task under `models` can serve an auxiliary task — approval review, compression,
+titles. Name the entry as the provider and the task as the model:
+
+```yaml
+auxiliary:
+  approval:
+    provider: my-decider     # the providers: key
+    model: guard             # the task under models
+    timeout: 30
+```
+
+Leave `base_url`, `api_key` and `key_env` out. Hermes collapses a task whose
+config carries both `base_url` and `api_key` to the provider name `custom`
+(`agent/auxiliary_client.py::_resolve_task_provider_model`), which erases the
+entry name before the plugin is consulted. The entry already holds the endpoint
+and the credential, so the task does not need them.
+
+The plugin registers one profile per `api_mode: systemone` entry, under the
+entry's own name. That registration is what makes the auxiliary path work: it
+resolves a task's provider by name through `PROVIDER_REGISTRY` and calls that
+profile's `create_client()`. Without it the name is unknown there and the task
+falls through to a plain OpenAI client, which posts to `/chat/completions` — a
+path a System One endpoint does not serve.
+
+The profile's `env_vars` comes from the entry's `key_env`. It must not be empty:
+`PROVIDER_REGISTRY` only holds providers that declare a credential variable, so
+a profile declaring none is invisible to the resolver.
+
 ## Config reference
 
 | Key | Required | Default | Notes |
