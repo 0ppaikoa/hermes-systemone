@@ -103,6 +103,14 @@ The `questions` body and its answer shapes follow the System One API definition:
 | `questions` | yes | — | [System One questions](https://docs.typesafe.ai/api/system-one) |
 | `response.expression` | yes | — | see Response expression |
 
+## Streaming
+
+The System One API has no streaming form. The profile declares
+`supports_streaming = False` (Hermes' standard opt-out), so the main loop runs
+the exchange non-streaming from the first attempt — no per-turn fallback delay,
+and no streaming retry path that could hand the client header values the
+plain-httpx facade cannot represent.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

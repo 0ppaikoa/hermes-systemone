@@ -62,7 +62,15 @@ def _settings_for_base_url(base_url: Any) -> dict[str, Any] | None:
 
 class SystemOneCustomProfile(CustomBaseProfile):
     """Override of the bundled ``custom`` profile: serves the SystemOne client for
-    ``api_mode: systemone`` routes."""
+    ``api_mode: systemone`` routes.
+
+    The System One API has no streaming form. Declaring ``supports_streaming =
+    False`` is Hermes' standard opt-out (``turn_api_call._should_stream`` reads
+    the profile attribute); without it the main loop picks the streaming path
+    and the first attempt of every turn fails before falling back.
+    """
+
+    supports_streaming = False
 
     def create_client(self, **client_kwargs: Any) -> Any:
         settings = _settings_for_base_url(client_kwargs.get("base_url"))

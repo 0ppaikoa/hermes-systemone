@@ -88,7 +88,20 @@ class SystemOneClient:
         return _v1_base(base) + API_PATH
 
     def _headers(self) -> dict[str, str]:
-        headers = {"Content-Type": "application/json", **self._default_headers}
+        """Merged request headers.
+
+        ``self._default_headers`` arrives from Hermes' client construction and
+        may carry ``openai.Omit`` values — the SDK's "send nothing" sentinel.
+        The SDK drops such values itself when building a request; plain httpx
+        does not and raises ``TypeError`` on them, so anything that is not a
+        ``str`` is treated as absent here.
+        """
+        merged = {
+            key: value
+            for key, value in self._default_headers.items()
+            if isinstance(value, str)
+        }
+        headers = {"Content-Type": "application/json", **merged}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
         return headers
@@ -105,6 +118,7 @@ class SystemOneClient:
     def _create(self, *, model: str = "", messages: Any = None, stream: bool = False, **kwargs: Any) -> Any:
         if stream:
             raise RuntimeError("SystemOne provider: streaming is not supported (supports_streaming=False).")
+
         settings = self._settings
         _require_settings(settings, part="questions")
         _require_settings(settings, part="expression")
