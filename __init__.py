@@ -22,6 +22,10 @@ from agent.transports.base import ProviderTransport
 from agent.transports.types import NormalizedResponse, ToolCall, Usage
 from providers import register_provider
 from providers.base import ProviderProfile
+from plugins.model_providers.custom import custom as _bundled_custom_instance
+
+# the bundled module holds an instance; the override class inherits its class
+CustomBaseProfile = type(_bundled_custom_instance)
 
 WIRE_PATH = "/systemone"
 
@@ -422,39 +426,70 @@ class SystemOneProfile(ProviderProfile):
 register_transport("systemone", SystemOneTransport)
 
 
-def _register_profiles_from_config() -> None:
-    """`providers:` 配下の `api_mode: systemone` エントリをプロファイルとして動的に登録する。
+# --- bundled "custom" provider の差替 ---------------------------------------
+# providers.<key> の api_mode: systemone entry は resolver が解決するが、runtime の
+# provider は「custom」になり、bundled CustomProfile は create_client を実装しない。
+# そのため façace（System 1 wire の送信面）が供給されない。user plugin dir に置いた
+# この差替は、custom の create_client に「systemone wire の entry にだけ façace を
+# 返す」動きを足す。それ以外の entry（chat_completions 等）は None を返し、
+# 標準 OpenAI client のままである。endpoint の一覧は設定に置く。
 
-    エンドポイントの一覧は設定に置く（設計書 §2 拘束条件5）。プラグインは wire を
-    実装するだけで、id・URL・モデル・認証の env 変数はすべて設定から取る。設定に
-    エントリを増やせば発見に乗り、プラグインコードは変わらない。照合はエントリの
-    キー名（小文字化）とプロファイル名の一致で行う。
+
+class SystemOneCustomProfile(CustomBaseProfile):
+    """bundled ``custom`` profile の差替。``api_mode: systemone`` の route に façace を供給する。"""
+
+    def create_client(self, **client_kwargs: Any) -> Any:
+        settings = _settings_for_base_url(client_kwargs.get("base_url"))
+        if settings is None:
+            return None
+        allowed = {"api_key", "base_url", "timeout", "http_client", "default_headers"}
+        return SystemOneClient(
+            settings=settings,
+            **{key: value for key, value in client_kwargs.items() if key in allowed},
+        )
+
+
+def _settings_for_base_url(base_url: Any) -> dict[str, Any] | None:
+    """`providers:` 配下から、*base_url* を持つ `api_mode: systemone` entry を探す。
+
+    見つからなければ None（façace を付さない）。実行時（create_client）の呼び出しで、
+    hermes_cli はその時点でロード済み。import 時の config 走査は行わない。
     """
     from hermes_cli.config import load_config
 
+    url = str(base_url or "").strip().rstrip("/")
+    if not url:
+        return None
     cfg = load_config() or {}
     providers_cfg = cfg.get("providers")
-    if not isinstance(providers_cfg, dict):
-        return
-    for key, entry in providers_cfg.items():
+    if isinstance(providers_cfg, dict):
+        for entry in providers_cfg.values():
+            if not isinstance(entry, dict):
+                continue
+            wire = str(entry.get("api_mode") or entry.get("transport") or "").strip().lower()
+            if wire != "systemone":
+                continue
+            if self_url(entry) == url:
+                return entry
+    for entry in cfg.get("custom_providers") or []:
         if not isinstance(entry, dict):
             continue
         wire = str(entry.get("api_mode") or entry.get("transport") or "").strip().lower()
         if wire != "systemone":
             continue
-        pid = str(key).strip().lower()
-        if not pid:
-            continue
-        register_provider(SystemOneProfile(
-            name=pid,
-            aliases=(pid,),
-            api_mode="systemone",
-            env_vars=("SYSTEMONE_API_KEY",),
-            base_url="",  # 設定から取得（設計書 §2 拘束条件5）
-            auth_type="api_key",
-            supports_streaming=False,
-            fallback_models=(),
-        ))
+        if self_url(entry) == url:
+            return entry
+    return None
 
 
-_register_profiles_from_config()
+def self_url(entry: dict[str, Any]) -> str:
+    url_str = str(entry.get("api") or entry.get("base_url") or entry.get("url") or "").strip().rstrip("/")
+    return url_str if url_str.endswith("/v1") else url_str + "/v1"
+
+
+register_provider(SystemOneCustomProfile(
+    name="custom",
+    aliases=("ollama", "local", "vllm", "llamacpp", "llama.cpp", "llama-cpp"),
+    env_vars=(),
+    base_url="",
+))
