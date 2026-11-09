@@ -1,13 +1,13 @@
 # hermes-systemone
 
 A [Hermes Agent](https://github.com/NousResearch/hermes-agent) model-provider plugin
-for the System 1 wire: a non-generative decision protocol served at
+for the **System 1** decision API — a non-generative protocol served at
 `POST /v1/systemone` by several vendors and self-hosted servers.
 
 System 1 models answer typed questions about a `state` — yes/no with a
 probability, a choice among criteria, a score on a rubric. They never generate
-text. This plugin makes one usable as the main-loop model in Hermes: it folds
-the conversation into `state`, sends the questions from config, and turns the
+text. This plugin makes one usable as the main-loop model in Hermes: it sends
+the conversation as `state`, asks the questions from config, and turns the
 answers into an assistant message.
 
 ## Install
@@ -56,9 +56,13 @@ One expression per endpoint. It maps the answers to the assistant message: a
 string becomes the message content; a dict may set `content`, `tool_calls`,
 `reasoning` and `finish_reason`.
 
-More endpoints: add more entries. `api_mode: systemone` selects this wire, so
+More endpoints: add more entries. `api_mode: systemone` selects this protocol, so
 the plugin never changes.
 
 ## Notes
 
 Errors are surfaced, not retried. Non-streaming.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
