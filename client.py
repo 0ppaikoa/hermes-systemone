@@ -124,8 +124,17 @@ class SystemOneClient:
         questions = settings.get("questions") or {}
         state = _format_state(list(messages or []), settings)
         url = self._url()
-        response = self._http.post(url, json={"model": model, "state": state, "questions": questions},
-                                   headers=self._headers())
+        # Per-request timeout. Hermes passes one on every call (an explicit
+        # `timeout=` kwarg from the auxiliary layer, e.g. auxiliary.<task>.timeout);
+        # httpx applies it to this request only, leaving the client's own default
+        # alone. Dropping it silently pinned every call to the construction-time
+        # default, so a stalled endpoint held the caller for the full 120s.
+        post_kwargs: dict[str, Any] = {"headers": self._headers()}
+        if kwargs.get("timeout") is not None:
+            post_kwargs["timeout"] = kwargs["timeout"]
+        response = self._http.post(
+            url, json={"model": model, "state": state, "questions": questions}, **post_kwargs
+        )
         if response.status_code != 200:
             raise RuntimeError(
                 f"SystemOne API error: HTTP {response.status_code}: {response.text[:300]}"
