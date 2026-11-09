@@ -65,8 +65,8 @@ line per message — what the model sees looks like:
 ```
 system: You are a helpful router.
 user: I was charged twice.
-tool: get_charges({"user": "me"})
-tool: get_charges({"user": "me"}) => 2 charges: 1200, 1200
+tool: get_charges({\"user\": \"me\"})
+tool: get_charges({\"user\": \"me\"}) => 2 charges: 1200, 1200
 assistant: Found it — refunding.
 user: Thanks. Please also email me a receipt.
 ```
