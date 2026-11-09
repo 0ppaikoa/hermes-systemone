@@ -54,6 +54,27 @@ def _v1_base(base: Any) -> str:
     return base if base.endswith("/v1") else base + "/v1"
 
 
+def _entry_models(entry: dict[str, Any]) -> set[str]:
+    """Every model id this entry claims: `default_model`, `model`, and the `models` catalog.
+
+    Lowercased, because config spelling and the wire id drift in case. An entry
+    that claims no model at all returns an empty set and can never win a
+    multi-candidate pick — that is deliberate: an unnamed entry on a shared
+    endpoint is ambiguous, and guessing is worse than an error.
+    """
+    out: set[str] = set()
+    for key in ("default_model", "model"):
+        value = str(entry.get(key) or "").strip()
+        if value:
+            out.add(value.lower())
+    models = entry.get("models")
+    if isinstance(models, dict):
+        out.update(str(name).strip().lower() for name in models if str(name).strip())
+    elif isinstance(models, (list, tuple)):
+        out.update(str(name).strip().lower() for name in models if str(name).strip())
+    return out
+
+
 class SystemOneClient:
     """OpenAI-SDK-shaped client over the System One API (POST /v1/systemone).
 
@@ -63,20 +84,67 @@ class SystemOneClient:
     same client. Errors are plain RuntimeError (not Hermes ProviderError
     subclasses); the auxiliary resolver catches them, and the main loop
     surfaces them as-is.
+
+    Several `api_mode: systemone` entries may share one base_url. The client
+    then holds every candidate on that URL and picks one per call from the
+    `model` the caller passes, because the URL alone cannot tell them apart.
     """
 
     HERMES_SKIP_TRANSPORT_WRAP = True
     HERMES_SKIP_ASYNC_WRAP = True
 
     def __init__(self, *, api_key: str = "", base_url: Any = None, settings: dict[str, Any] | None = None,
+                 candidates: list[dict[str, Any]] | None = None,
                  default_headers: Any = None, timeout: Any = None, http_client: Any = None, **_: Any) -> None:
         self.api_key = api_key
         self.base_url = _norm_url(base_url)
-        self._settings = settings or {}
+        if candidates is not None:
+            self._candidates = [entry for entry in candidates if isinstance(entry, dict)]
+        elif settings is not None:
+            self._candidates = [settings]
+        else:
+            self._candidates = []
+        self._settings = self._candidates[0] if len(self._candidates) == 1 else {}
         self._default_headers = dict(default_headers or {})
         self.is_closed = False
         self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
         self._http = http_client or httpx.Client(timeout=timeout or 120.0)
+
+    def _settings_for_model(self, model: str) -> dict[str, Any]:
+        """The entry this call belongs to.
+
+        One candidate on the URL: that one, whatever the model says — the
+        single-entry setup keeps working exactly as before. Several: the entry
+        that claims `model`. Ambiguity is an error, never a silent pick — a
+        wrong pick means sending another provider's questions.
+        """
+        if not self._candidates:
+            raise RuntimeError(
+                "SystemOne provider: no `api_mode: systemone` entry matches this base_url."
+            )
+        if len(self._candidates) == 1:
+            return self._candidates[0]
+        wanted = str(model or "").strip().lower()
+        names = [str(entry.get("_key") or entry.get("name") or "?") for entry in self._candidates]
+        if not wanted:
+            raise RuntimeError(
+                "SystemOne provider: several System One providers share this base_url "
+                f"({names}) and no model was given to choose one."
+            )
+        hits = [entry for entry in self._candidates if wanted in _entry_models(entry)]
+        if len(hits) == 1:
+            return hits[0]
+        if not hits:
+            raise RuntimeError(
+                "SystemOne provider: several System One providers share this base_url "
+                f"({names}) and none claims model {model!r}. Set `default_model` "
+                "(or list it under `models`) on the intended entry."
+            )
+        raise RuntimeError(
+            f"SystemOne provider: model {model!r} is claimed by several entries on this "
+            f"base_url ({[str(e.get('_key') or e.get('name') or '?') for e in hits]}). "
+            "Give each entry a distinct model."
+        )
 
     def _url(self) -> str:
         base = self.base_url
@@ -119,7 +187,7 @@ class SystemOneClient:
         if stream:
             raise RuntimeError("SystemOne provider: streaming is not supported (supports_streaming=False).")
 
-        settings = self._settings
+        settings = self._settings_for_model(model)
         _require_settings(settings, part="questions")
         _require_settings(settings, part="expression")
         questions = settings.get("questions") or {}

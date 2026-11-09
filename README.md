@@ -55,6 +55,50 @@ providers:
 More endpoints: add more entries. `api_mode: systemone` selects this protocol, so
 the plugin never changes.
 
+## Several providers on one endpoint
+
+Two System One providers may share one `api` URL — a classifier and a guard, say.
+The URL cannot tell them apart, so the client picks per call from the `model` the
+caller passes, and each entry must claim a distinct model via `default_model`
+(or the `models` catalog):
+
+```yaml
+providers:
+  greeter:
+    api: https://your-system-one-endpoint/v1
+    key_env: MY_SYSTEMONE_API_KEY
+    api_mode: systemone
+    default_model: clef:27b          # this entry answers for clef:27b
+    questions:
+      is_greeting:
+        type: noul
+        instructions: "Is this text a greeting?"
+    response:
+      expression: "'greeting' if answers.is_greeting.noul > 0.5 else 'not-greeting'"
+
+  severity:
+    api: https://your-system-one-endpoint/v1   # same URL
+    key_env: MY_SYSTEMONE_API_KEY
+    api_mode: systemone
+    default_model: clef:latest       # this entry answers for clef:latest
+    questions:
+      harm:
+        type: score
+        instructions: "How much harm would running this command do?"
+        criteria:
+          - read-only
+          - recoverable
+          - needs repair
+          - irreversible
+    response:
+      expression: "format(answers.harm.score, '.2f')"
+```
+
+A call whose model matches neither entry raises instead of guessing, and so does
+a model claimed by two entries on the same URL. With a single entry on the URL
+the model is not consulted at all, so existing single-provider configs behave
+exactly as before.
+
 ## State format
 
 `state.format` specifies how the thread is provided to the System 1 model.

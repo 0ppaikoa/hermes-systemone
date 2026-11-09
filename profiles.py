@@ -26,38 +26,44 @@ def _entry_url(entry: dict[str, Any]) -> str:
     return url_str if url_str.endswith("/v1") else url_str + "/v1"
 
 
-def _settings_for_base_url(base_url: Any) -> dict[str, Any] | None:
-    """Find the `providers:` entry whose URL matches and which declares
-    `api_mode: systemone`, else None (no client override). Runs at create_client
-    time, when hermes_cli is already loaded; no scan happens at import time.
-    URL comparison is normalized: scheme/host/path lowercased, query and
-    fragment dropped, so `HTTPS://…` and `…?x=1` still match.
+def _is_systemone(entry: dict[str, Any]) -> bool:
+    mode = str(entry.get("api_mode") or entry.get("transport") or "").strip().lower()
+    return mode == "systemone"
+
+
+def _settings_for_base_url(base_url: Any) -> list[dict[str, Any]]:
+    """Every `providers:` entry whose URL matches and which declares
+    `api_mode: systemone`, in config order. Empty means no client override.
+
+    A list, not one entry: two System One providers may legitimately share one
+    endpoint (a classifier and a guard, say), and only the model tells them
+    apart. The client picks per call; the URL alone never decides.
+
+    Runs at create_client time, when hermes_cli is already loaded; no scan
+    happens at import time. URL comparison is normalized: scheme/host/path
+    lowercased, query and fragment dropped, so `HTTPS://…` and `…?x=1` match.
     """
     from hermes_cli.config import load_config
 
     url = _norm_url(base_url)
     if not url:
-        return None
+        return []
     cfg = load_config() or {}
+    found: list[dict[str, Any]] = []
     providers_cfg = cfg.get("providers")
     if isinstance(providers_cfg, dict):
-        for entry in providers_cfg.values():
-            if not isinstance(entry, dict):
-                continue
-            mode = str(entry.get("api_mode") or entry.get("transport") or "").strip().lower()
-            if mode != "systemone":
+        for key, entry in providers_cfg.items():
+            if not isinstance(entry, dict) or not _is_systemone(entry):
                 continue
             if _entry_url(entry) == url:
-                return entry
+                found.append({"_key": str(key), **entry})
     for entry in cfg.get("custom_providers") or []:
-        if not isinstance(entry, dict):
-            continue
-        mode = str(entry.get("api_mode") or entry.get("transport") or "").strip().lower()
-        if mode != "systemone":
+        if not isinstance(entry, dict) or not _is_systemone(entry):
             continue
         if _entry_url(entry) == url:
-            return entry
-    return None
+            key = str(entry.get("provider_key") or entry.get("name") or "")
+            found.append({"_key": key, **entry})
+    return found
 
 
 class SystemOneCustomProfile(CustomBaseProfile):
@@ -73,11 +79,11 @@ class SystemOneCustomProfile(CustomBaseProfile):
     supports_streaming = False
 
     def create_client(self, **client_kwargs: Any) -> Any:
-        settings = _settings_for_base_url(client_kwargs.get("base_url"))
-        if settings is None:
+        candidates = _settings_for_base_url(client_kwargs.get("base_url"))
+        if not candidates:
             return None
         allowed = {"api_key", "base_url", "timeout", "http_client", "default_headers"}
         return SystemOneClient(
-            settings=settings,
+            candidates=candidates,
             **{key: value for key, value in client_kwargs.items() if key in allowed},
         )
