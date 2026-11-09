@@ -420,12 +420,27 @@ class SystemOneProfile(ProviderProfile):
 
 
 register_transport("systemone", SystemOneTransport)
+
+# エンドポイントごとのプロファイル。設計書 §3: 同一 wire（systemone）を TypeSafe 公式と
+# Ollama Cloud など複数実装で使えるように、id を分けて登録する。設定探索
+# （_settings_for）はこの id を鍵に `providers.<id>` を読むので、config 側も同じ名前で
+# エントリを書く。認証情報の env 変数は設定の key_env が優先され、env_vars はフォールバック。
 register_provider(SystemOneProfile(
     name="systemone",
-    aliases=("s1",),
+    aliases=("s1", "typesafe-s1"),
     api_mode="systemone",
-    env_vars=("SYSTEMONE_API_KEY",),
+    env_vars=("SYSTEMONE_API_KEY", "TYPESAFE_API_KEY"),
     base_url="",  # 設定から取得（設計書 §2 拘束条件5）
+    auth_type="api_key",
+    supports_streaming=False,
+    fallback_models=(),
+))
+register_provider(SystemOneProfile(
+    name="systemone-ollama",
+    aliases=("ollama-s1", "systemone-ollama-cloud"),
+    api_mode="systemone",
+    env_vars=("OLLAMA_API_KEY",),
+    base_url="",
     auth_type="api_key",
     supports_streaming=False,
     fallback_models=(),
