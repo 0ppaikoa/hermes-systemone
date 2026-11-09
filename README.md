@@ -59,6 +59,23 @@ string becomes the message content; a dict may set `content`, `tool_calls`,
 More endpoints: add more entries. `api_mode: systemone` selects this protocol, so
 the plugin never changes.
 
+## Config reference
+
+| Key | Required | Default | Notes |
+|---|---|---|---|
+| `api` | yes | — | endpoint URL |
+| `key_env` | yes | — | env variable holding the API key |
+| `default_model` | yes | — | model name at the endpoint |
+| `api_mode` | yes | `chat_completions` | set to `systemone` |
+| `state.format` | no | `string` | `string` or `array` |
+| `state.includes.*` | no | all `false` | `system` / `user` / `assistant` / `tool` / `reasoning` |
+| `questions` | yes | — | System One questions, sent as-is |
+| `response.expression` | yes | — | Python expression; may return `str` or `dict` |
+| dict → `content` | no | `null` | message text |
+| dict → `tool_calls` | no | `null` | list of `{name, arguments}` dicts |
+| dict → `reasoning` | no | `null` | free text |
+| dict → `finish_reason` | no | `"stop"` | |
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
