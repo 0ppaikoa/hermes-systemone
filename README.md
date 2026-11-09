@@ -52,12 +52,24 @@ providers:
         else 'Invoking a tool'
 ```
 
-One expression per endpoint. It maps the answers to the assistant message: a
-string becomes the message content; a dict may set `content`, `tool_calls`,
-`reasoning` and `finish_reason`.
-
 More endpoints: add more entries. `api_mode: systemone` selects this protocol, so
 the plugin never changes.
+
+## Response expression
+
+`providers.<id>.response.expression` is a Python expression, evaluated with
+[simpleeval](https://pypi.org/project/simpleeval/) on every turn. `answers` holds
+the System One response keyed by question name. What the expression returns is
+what becomes the assistant message:
+
+- **A string** becomes the message content, and the turn ends there (no tool
+  calls).
+- **A dict** sets the message fields explicitly: `content` is the message text;
+  `tool_calls` is a list of `{name, arguments}` dicts the agent runs next;
+  `reasoning` is free text; `finish_reason` defaults to `"stop"`.
+
+The `questions` body and its answer shapes follow the System One API definition:
+[System One API reference](https://docs.typesafe.ai/api/system-one).
 
 ## Config reference
 
@@ -69,12 +81,8 @@ the plugin never changes.
 | `api_mode` | yes | `chat_completions` | **set to `systemone`**; otherwise the entry is served by the standard OpenAI client. |
 | `state.format` | no | `string` | `string` or `array` |
 | `state.includes.*` | no | all `false` | include more history; the latest user message is always sent |
-| `questions` | yes | — | System One questions, sent as-is |
-| `response.expression` | yes | — | Python expression; may return `str` or `dict` |
-| dict → `content` | no | `null` | message text |
-| dict → `tool_calls` | no | `null` | list of `{name, arguments}` dicts |
-| dict → `reasoning` | no | `null` | free text |
-| dict → `finish_reason` | no | `"stop"` | |
+| `questions` | yes | — | [System One questions](https://docs.typesafe.ai/api/system-one) |
+| `response.expression` | yes | — | see Response expression |
 
 ## License
 
