@@ -1,14 +1,18 @@
-"""System 1 wire provider plugin for Hermes Agent.
+"""System One (System 1) provider plugin for Hermes Agent.
 
-System 1 は判定特化 wire。`POST /v1/systemone` を wire とする実装が複数あり、
-このプラグインはそのいずれにも接続できる。テキストを生成しないため、このプラグインは:
+System One is a decision-only API served at `POST /v1/systemone`. Several
+vendors and self-hosted servers speak it, and it never generates text, so this
+plugin:
 
-- Hermes の履歴（OpenAI 形）を `state` に畳む。書式は `providers.<name>.state`
-- 質問を設定 `providers.<name>.questions` から組み立てる。省略はエラー
-- 回答 `answers` を射影式 `providers.<name>.response.expression` でアシスタント
-  メッセージに組み立て直す。省略はエラー
+- sends the OpenAI-shaped conversation history as the `state` (shape from
+  `providers.<name>.state`),
+- assembles questions from `providers.<name>.questions`; missing settings are
+  errors, not silent defaults,
+- re-assembles the returned `answers` into an assistant message through the
+  projection expression in `providers.<name>.response.expression`.
 
-コアの改造はしない。設計書: systemone-provider-design.md（AokiApp、2026-11-09）。
+No core changes. Design notes: systemone-provider-design.md (AokiApp,
+2026-11-09).
 """
 
 from __future__ import annotations
@@ -27,21 +31,21 @@ from plugins.model_providers.custom import custom as _bundled_custom_instance
 # the bundled module holds an instance; the override class inherits its class
 CustomBaseProfile = type(_bundled_custom_instance)
 
-WIRE_PATH = "/systemone"
+API_PATH = "/systemone"
 
 
 def _v1_base(base: Any) -> str:
-    """base_url を /v1 で終わる形に正規化する。`https://example.com` → `https://example.com/v1`。"""
+    """Normalize base_url to end with /v1: `https://example.com` -> `https://example.com/v1`."""
     base = str(base or "").strip().rstrip("/")
     return base if base.endswith("/v1") else base + "/v1"
 
-# --- 設定の読み取り ----------------------------------------------------------
+# --- settings ----------------------------------------------------------------
 
 
 def _settings_for(provider: str) -> dict[str, Any]:
-    """`providers.<name>` または `custom_providers:[]` から *provider* の設定を取り出す。
+    """Read `providers.<name>` (or a legacy `custom_providers:` entry) by provider id.
 
-    見つからなければ空 dict。質問と射影式の省略は生成時にエラーにする。
+    Returns {} when absent; missing questions / expression raise at request time.
     """
     from hermes_cli.config import load_config
 
@@ -65,25 +69,25 @@ def _require_settings(settings: dict[str, Any], *, part: str) -> None:
     if part == "questions":
         if not isinstance(questions, dict) or not questions:
             raise RuntimeError(
-                "SystemOne provider: 質問セットが設定されていません。"
-                "providers.<name>.questions に System 1 の questions を書いてください。"
+                "SystemOne provider: no questions configured. "
+                "Write providers.<name>.questions in config.yaml."
             )
         return
     expression = (settings.get("response") or {}).get("expression")
     if not (isinstance(expression, str) and expression.strip()):
         raise RuntimeError(
-            "SystemOne provider: 射影式が設定されていません。"
-            "providers.<name>.response.expression を書いてください。"
+            "SystemOne provider: no projection expression configured. "
+            "Write providers.<name>.response.expression in config.yaml."
         )
 
 
-# --- state の畳み込み ---------------------------------------------------------
+# --- state -------------------------------------------------------------------
 
 _ROLES = ("system", "user", "assistant", "tool", "reasoning")
 
 
 def _escape(text: Any) -> str:
-    """内容を JSON エスケープする（1行保証）。外側の引用符は剥がす。"""
+    """JSON-escape content so it stays one line; strips the outer quotes."""
     return json.dumps(str(text if text is not None else ""), ensure_ascii=False)[1:-1]
 
 
@@ -102,7 +106,7 @@ def _content_text(content: Any) -> str:
 
 
 def _tool_call_index(messages: list[dict[str, Any]]) -> dict[str, tuple[str, str]]:
-    """tool_call_id → (name, arguments)。tool 結果行を組み立てるのに使う。"""
+    """tool_call_id -> (name, arguments), for building tool result entries."""
     index: dict[str, tuple[str, str]] = {}
     for m in messages:
         if not isinstance(m, dict) or m.get("role") != "assistant":
@@ -116,8 +120,8 @@ def _tool_call_index(messages: list[dict[str, Any]]) -> dict[str, tuple[str, str
     return index
 
 
-def _fold_state_string(messages: list[dict[str, Any]], includes: dict[str, Any]) -> str:
-    """OpenAI 形 messages → `role: 内容` の行書式。設計書 §4.1。"""
+def _format_state_string(messages: list[dict[str, Any]], includes: dict[str, Any]) -> str:
+    """OpenAI-shaped messages -> `role: content` lines. Design doc section 4.1."""
     call_map = _tool_call_index(messages)
     lines: list[str] = []
     for m in messages:
@@ -148,10 +152,10 @@ def _fold_state_string(messages: list[dict[str, Any]], includes: dict[str, Any])
     return "\n".join(lines)
 
 
-def _fold_state_array(messages: list[dict[str, Any]], includes: dict[str, Any]) -> list[dict[str, Any]]:
-    """OpenAI 形 messages → includes で選ばれた要素を残した配列。設計書 §4.2。
+def _format_state_array(messages: list[dict[str, Any]], includes: dict[str, Any]) -> list[dict[str, Any]]:
+    """OpenAI-shaped messages -> the entries selected by `includes`, as a list. Design doc 4.2.
 
-    role ラベルは必須（配列の要素が role を運ぶ）。
+    Role labels are required: the array carries them.
     """
     out: list[dict[str, Any]] = []
     role_of = {"system": "system", "user": "user", "assistant": "assistant", "tool": "tool"}
@@ -173,25 +177,26 @@ def _fold_state_array(messages: list[dict[str, Any]], includes: dict[str, Any]) 
     return out
 
 
-def _fold_state(messages: list[dict[str, Any]], settings: dict[str, Any]) -> Any:
+def _format_state(messages: list[dict[str, Any]], settings: dict[str, Any]) -> Any:
     state_cfg = settings.get("state") or {}
     fmt = str(state_cfg.get("format") or "string").strip().lower()
     includes = state_cfg.get("includes")
     includes = includes if isinstance(includes, dict) else {}
     if fmt == "array":
-        return _fold_state_array(messages, includes)
-    return _fold_state_string(messages, includes)
+        return _format_state_array(messages, includes)
+    return _format_state_string(messages, includes)
 
 
-# --- 応答の組み立て -----------------------------------------------------------
+# --- response assembly -------------------------------------------------------
 
 def _eval_expression(expression: str, answers: dict[str, Any]) -> Any:
-    """射影式を simpleeval で評価する。名前空間は answers（plain data）と
-    ホワイトリスト済みのビルトインだけ。設計書 §5.1。
+    """Evaluate the projection expression with simpleeval. Namespaces: `answers`
+    (plain data) plus a whitelist of builtins. Design doc 5.1.
 
-    simpleeval の標準 evaluator は dict / list リテラルを評価しない（実測:
-    FeatureNotAvailable）。射影式は dict を返す（§5.2）ので、その2ノードだけを
-    最小限足した派生 evaluator を使う。内包表記（comprehension）は許可しない。
+    simpleeval's default evaluator does not evaluate dict / list literals
+    (FeatureNotAvailable), and the projection expression returns a dict
+    (design doc 5.2), so exactly those nodes are added. Comprehensions stay
+    rejected.
     """
     import ast as _ast
 
@@ -203,8 +208,8 @@ def _eval_expression(expression: str, answers: dict[str, Any]) -> Any:
         "int": int,
         "float": float,
         "str": str,
-        # 書式化。文字列メソッド（"%.2f".format(x)）は simpleeval が禁止するため、
-        # Python ビルトインの 2引数 format(value, spec) をホワイトリストで提供する。
+        # String methods ('%.2f'.format(x)) are rejected by simpleeval, so the
+        # two-argument builtin format(value, spec) is whitelisted instead.
         "format": format,
         "json_dumps": lambda value: json.dumps(value, ensure_ascii=False),
     }
@@ -227,7 +232,7 @@ _MESSAGE_KEYS = ("content", "tool_calls", "reasoning", "finish_reason")
 
 
 def _assemble(expression_result: Any, answers: dict[str, Any], usage: dict[str, Any], model: str) -> SimpleNamespace:
-    """射影式の結果（Union[dict, str]）→ OpenAI 形 response。設計書 §5.2 / §5.3。"""
+    """Projection result (dict or str) -> OpenAI-shaped response. Design doc 5.2 / 5.3."""
     content: Any = None
     tool_calls: list[Any] = []
     reasoning: Any = None
@@ -238,30 +243,30 @@ def _assemble(expression_result: Any, answers: dict[str, Any], usage: dict[str, 
         unknown = [key for key in expression_result if key not in _MESSAGE_KEYS]
         if unknown:
             raise RuntimeError(
-                "SystemOne provider: 射影式の戻り値に未知のキーがあります。"
-                f"許容キーは {list(_MESSAGE_KEYS)}。未知: {unknown}"
+                "SystemOne provider: unknown keys in the projection result. "
+                f"Allowed keys: {list(_MESSAGE_KEYS)}. Unknown: {unknown}"
             )
         content = expression_result.get("content")
         raw_calls = expression_result.get("tool_calls")
         if raw_calls is not None and not isinstance(raw_calls, list):
-            raise RuntimeError("SystemOne provider: tool_calls には list を返してください。")
+            raise RuntimeError("SystemOne provider: tool_calls must be a list.")
         tool_calls = list(raw_calls or [])
         reasoning = expression_result.get("reasoning")
         if expression_result.get("finish_reason"):
             finish_reason = str(expression_result["finish_reason"])
     else:
         raise RuntimeError(
-            "SystemOne provider: 射影式は str または dict を返してください。"
-            f"（実際: {type(expression_result).__name__}）"
+            "SystemOne provider: the projection expression must return a str or a dict "
+            f"(got {type(expression_result).__name__})."
         )
 
-    wire_calls = []
+    calls: list[SimpleNamespace] = []
     for i, tc in enumerate(tool_calls):
         if not isinstance(tc, dict):
-            raise RuntimeError("SystemOne provider: tool_calls の各要素は dict にしてください。")
+            raise RuntimeError("SystemOne provider: each tool_calls entry must be a dict.")
         fn = tc.get("function") or {}
         arguments = fn.get("arguments", tc.get("arguments"))
-        wire_calls.append(
+        calls.append(
             SimpleNamespace(
                 id=str(tc.get("id") or f"call_{i}"),
                 type="function",
@@ -282,7 +287,7 @@ def _assemble(expression_result: Any, answers: dict[str, Any], usage: dict[str, 
     message = SimpleNamespace(
         role="assistant",
         content=content,
-        tool_calls=wire_calls or None,
+        tool_calls=calls or None,
         reasoning_content=reasoning,
         refusal=None,
     )
@@ -294,14 +299,14 @@ def _assemble(expression_result: Any, answers: dict[str, Any], usage: dict[str, 
     )
 
 
-# --- クライアント façade -------------------------------------------------------
+# --- client ------------------------------------------------------------------
 
 class SystemOneClient:
-    """OpenAI-SDK 形の窓口。裏で System 1 wire（POST /v1/systemone）を叩く。
+    """OpenAI-SDK-shaped client over the System One API (POST /v1/systemone).
 
-    Hermes からは `client.chat.completions.create(**kwargs)` で見える。
-    質問と state の組み立て、answers → アシスタントメッセージへの組み立て直しは
-    この窓口の裏で完結する。
+    Hermes sees the usual `client.chat.completions.create(**kwargs)` surface;
+    state assembly, question build, and answer-to-message conversion happen
+    inside this client.
     """
 
     HERMES_SKIP_TRANSPORT_WRAP = True
@@ -322,10 +327,10 @@ class SystemOneClient:
         base = self.base_url
         if not base:
             raise RuntimeError(
-                "SystemOne provider: base_url が設定されていません。"
-                "providers.<name>.base_url に System 1 実装の URL を書いてください。"
+                "SystemOne provider: base_url is not configured. "
+                "Set providers.<name>.base_url to the API endpoint."
             )
-        return _v1_base(base) + WIRE_PATH
+        return _v1_base(base) + API_PATH
 
     def close(self) -> None:
         self.is_closed = True
@@ -338,19 +343,19 @@ class SystemOneClient:
 
     def _create(self, *, model: str = "", messages: Any = None, stream: bool = False, **kwargs: Any) -> Any:
         if stream:
-            raise RuntimeError("SystemOne provider: 現設計は非ストリーミングのみです（supports_streaming=False）。")
+            raise RuntimeError("SystemOne provider: streaming is not supported (supports_streaming=False).")
         settings = self._settings
         _require_settings(settings, part="questions")
         _require_settings(settings, part="expression")
         questions = settings.get("questions") or {}
-        state = _fold_state(list(messages or []), settings)
+        state = _format_state(list(messages or []), settings)
         url = self._url()
         headers = {"Content-Type": "application/json", "Authorization": f"Bearer {self.api_key}"}
         response = self._http.post(url, json={"model": model, "state": state, "questions": questions},
                                    headers=headers)
         if response.status_code != 200:
             raise RuntimeError(
-                f"SystemOne wire error: HTTP {response.status_code}: {response.text[:300]}"
+                f"SystemOne API error: HTTP {response.status_code}: {response.text[:300]}"
             )
         data = response.json()
         expression = (settings.get("response") or {}).get("expression")
@@ -359,12 +364,12 @@ class SystemOneClient:
         return _assemble(result, answers, data.get("usage") or {}, model)
 
 
-# --- トランスポート ------------------------------------------------------------
+# --- transport ---------------------------------------------------------------
 
 class SystemOneTransport(ProviderTransport):
-    """api_mode='systemone' のトランスポート。
+    """`api_mode='systemone'` transport.
 
-    メッセージから wire 形への翻訳は façade 側で完結するので、この層は identity。"""
+    Message conversion happens in the client, so this layer is identity. """
 
     @property
     def api_mode(self) -> str:
@@ -395,7 +400,7 @@ class SystemOneTransport(ProviderTransport):
         )
 
 
-# --- プロバイダプロファイル ------------------------------------------------------
+# --- provider profile --------------------------------------------------------
 
 class SystemOneProfile(ProviderProfile):
     def create_client(self, **client_kwargs: Any) -> Any:
@@ -426,17 +431,18 @@ class SystemOneProfile(ProviderProfile):
 register_transport("systemone", SystemOneTransport)
 
 
-# --- bundled "custom" provider の差替 ---------------------------------------
-# providers.<key> の api_mode: systemone entry は resolver が解決するが、runtime の
-# provider は「custom」になり、bundled CustomProfile は create_client を実装しない。
-# そのため façace（System 1 wire の送信面）が供給されない。user plugin dir に置いた
-# この差替は、custom の create_client に「systemone wire の entry にだけ façace を
-# 返す」動きを足す。それ以外の entry（chat_completions 等）は None を返し、
-# 標準 OpenAI client のままである。endpoint の一覧は設定に置く。
+# --- override of the bundled "custom" profile --------------------------------
+# A `providers.<key>` entry with api_mode: systemone resolves through the custom
+# runtime, whose provider name is "custom"; the bundled CustomProfile does not
+# implement create_client, so no client is served for it. This override appends
+# create_client: it returns the SystemOneClient only when the entry behind the
+# URL declares api_mode: systemone, and None otherwise (which keeps the standard
+# OpenAI client for every other route). The endpoint list lives in config.
 
 
 class SystemOneCustomProfile(CustomBaseProfile):
-    """bundled ``custom`` profile の差替。``api_mode: systemone`` の route に façace を供給する。"""
+    """Override of the bundled ``custom`` profile: serves the SystemOne client for
+    ``api_mode: systemone`` routes."""
 
     def create_client(self, **client_kwargs: Any) -> Any:
         settings = _settings_for_base_url(client_kwargs.get("base_url"))
@@ -450,10 +456,9 @@ class SystemOneCustomProfile(CustomBaseProfile):
 
 
 def _settings_for_base_url(base_url: Any) -> dict[str, Any] | None:
-    """`providers:` 配下から、*base_url* を持つ `api_mode: systemone` entry を探す。
-
-    見つからなければ None（façace を付さない）。実行時（create_client）の呼び出しで、
-    hermes_cli はその時点でロード済み。import 時の config 走査は行わない。
+    """Find the `providers:` entry whose URL matches and which declares
+    `api_mode: systemone`, else None (no client override). Runs at create_client
+    time, when hermes_cli is already loaded; no scan happens at import time.
     """
     from hermes_cli.config import load_config
 
@@ -466,30 +471,30 @@ def _settings_for_base_url(base_url: Any) -> dict[str, Any] | None:
         for entry in providers_cfg.values():
             if not isinstance(entry, dict):
                 continue
-            wire = str(entry.get("api_mode") or entry.get("transport") or "").strip().lower()
-            if wire != "systemone":
+            mode = str(entry.get("api_mode") or entry.get("transport") or "").strip().lower()
+            if mode != "systemone":
                 continue
-            if self_url(entry) == url:
+            if _entry_url(entry) == url:
                 return entry
     for entry in cfg.get("custom_providers") or []:
         if not isinstance(entry, dict):
             continue
-        wire = str(entry.get("api_mode") or entry.get("transport") or "").strip().lower()
-        if wire != "systemone":
+        mode = str(entry.get("api_mode") or entry.get("transport") or "").strip().lower()
+        if mode != "systemone":
             continue
-        if self_url(entry) == url:
+        if _entry_url(entry) == url:
             return entry
     return None
 
 
-def self_url(entry: dict[str, Any]) -> str:
+def _entry_url(entry: dict[str, Any]) -> str:
     url_str = str(entry.get("api") or entry.get("base_url") or entry.get("url") or "").strip().rstrip("/")
     return url_str if url_str.endswith("/v1") else url_str + "/v1"
 
 
 register_provider(SystemOneCustomProfile(
     name="custom",
-    aliases=(),  # 別名（ローカルサーバ系→custom）はコアの alias 表が担保する（実測）
+    aliases=(),  # local-server alias names already map to custom in the core alias table
     env_vars=(),
     base_url="",
 ))
