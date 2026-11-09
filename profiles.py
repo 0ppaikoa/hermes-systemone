@@ -72,11 +72,6 @@ class SystemOneCustomProfile(CustomBaseProfile):
 
     supports_streaming = False
 
-    def __post_init__(self) -> None:
-        # The parent is a dataclass: a bare class attribute is shadowed by the
-        # instance field (default None), so set it on the instance here.
-        self.supports_streaming = False
-
     def create_client(self, **client_kwargs: Any) -> Any:
         settings = _settings_for_base_url(client_kwargs.get("base_url"))
         if settings is None:
