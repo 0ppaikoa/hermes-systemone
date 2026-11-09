@@ -8,9 +8,11 @@ normalization helpers shared with `profiles.py`.
 from __future__ import annotations
 
 import json
+import os
 from types import SimpleNamespace
 from typing import Any
 
+import httpx
 from .expression import _assemble, _eval_expression
 from .state import _format_state
 
@@ -68,8 +70,6 @@ class SystemOneClient:
 
     def __init__(self, *, api_key: str = "", base_url: Any = None, settings: dict[str, Any] | None = None,
                  default_headers: Any = None, timeout: Any = None, http_client: Any = None, **_: Any) -> None:
-        import httpx
-
         self.api_key = api_key
         self.base_url = _norm_url(base_url)
         self._settings = settings or {}

@@ -6,6 +6,7 @@ user-provided projection expression (`providers.<id>.response.expression`).
 
 from __future__ import annotations
 
+import ast as _ast
 import json
 from types import SimpleNamespace
 from typing import Any
@@ -32,9 +33,8 @@ def _eval_expression(expression: str, answers: dict[str, Any]) -> Any:
     (design doc 5.2), so exactly those nodes are added. Comprehensions stay
     rejected.
     """
-    import ast as _ast
-
-    import simpleeval
+    import simpleeval  # optional dependency: imported lazily so a missing install
+    # still lets plugin discovery register transport + profiles
 
     functions = {
         "len": len,
