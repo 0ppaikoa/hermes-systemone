@@ -68,7 +68,7 @@ the plugin never changes.
 | `default_model` | yes | — | model name at the endpoint |
 | `api_mode` | yes | `chat_completions` | set to `systemone` |
 | `state.format` | no | `string` | `string` or `array` |
-| `state.includes.*` | no | all `false` | `system` / `user` / `assistant` / `tool` / `reasoning` |
+| `state.includes.*` | no | all `false` | include at least `user`, or the state is empty |
 | `questions` | yes | — | System One questions, sent as-is |
 | `response.expression` | yes | — | Python expression; may return `str` or `dict` |
 | dict → `content` | no | `null` | message text |
