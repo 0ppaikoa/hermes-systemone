@@ -120,15 +120,31 @@ def _tool_call_index(messages: list[dict[str, Any]]) -> dict[str, tuple[str, str
     return index
 
 
+def _last_user_index(messages: list[dict[str, Any]]) -> int | None:
+    """Index of the latest user message, or None. Always included in the state,
+    regardless of `state.includes` (design decision 2026-11-09)."""
+    for i in range(len(messages) - 1, -1, -1):
+        m = messages[i]
+        if isinstance(m, dict) and m.get("role") == "user":
+            return i
+    return None
+
+
 def _format_state_string(messages: list[dict[str, Any]], includes: dict[str, Any]) -> str:
-    """OpenAI-shaped messages -> `role: content` lines. Design doc section 4.1."""
+    """OpenAI-shaped messages -> `role: content` lines. Design doc 4.1.
+
+    The latest user message is always included, regardless of `includes`.
+    """
     call_map = _tool_call_index(messages)
+    forced = _last_user_index(messages)
     lines: list[str] = []
-    for m in messages:
+    for i, m in enumerate(messages):
         if not isinstance(m, dict):
             continue
         role = str(m.get("role") or "")
         if role == "assistant":
+            if not includes.get("assistant"):
+                continue
             reasoning = m.get("reasoning_content") or m.get("reasoning")
             if reasoning and includes.get("reasoning"):
                 lines.append(f"reasoning: {_escape(_content_text(reasoning))}")
@@ -140,11 +156,13 @@ def _format_state_string(messages: list[dict[str, Any]], includes: dict[str, Any
                 call = f"{fn.get('name')}({fn.get('arguments')})"
                 lines.append(f"tool: {_escape(call)}")
         elif role == "tool":
+            if not includes.get("tool"):
+                continue
             name, args = call_map.get(str(m.get("tool_call_id") or ""), ("", ""))
             result = _escape(_content_text(m.get("content")))
             lines.append(f"tool: {_escape(f'{name}({args})')} => {result}")
         elif role in ("system", "user"):
-            if not includes.get(role):
+            if not includes.get(role) and i != forced:
                 continue
             text = _content_text(m.get("content"))
             if text:
@@ -155,11 +173,13 @@ def _format_state_string(messages: list[dict[str, Any]], includes: dict[str, Any
 def _format_state_array(messages: list[dict[str, Any]], includes: dict[str, Any]) -> list[dict[str, Any]]:
     """OpenAI-shaped messages -> the entries selected by `includes`, as a list. Design doc 4.2.
 
-    Role labels are required: the array carries them.
+    Role labels are required: the array carries them. The latest user message is
+    always included, regardless of `includes`.
     """
     out: list[dict[str, Any]] = []
     role_of = {"system": "system", "user": "user", "assistant": "assistant", "tool": "tool"}
-    for m in messages:
+    forced = _last_user_index(messages)
+    for i, m in enumerate(messages):
         if not isinstance(m, dict):
             continue
         role = str(m.get("role") or "")
@@ -167,7 +187,7 @@ def _format_state_array(messages: list[dict[str, Any]], includes: dict[str, Any]
             reasoning = m.get("reasoning_content") or m.get("reasoning")
             if reasoning and includes.get("reasoning"):
                 out.append({"role": "reasoning", "content": _content_text(reasoning)})
-        if role in role_of and includes.get(role):
+        if role in role_of and (includes.get(role) or i == forced):
             entry: dict[str, Any] = {"role": role, "content": m.get("content")}
             if role == "assistant" and m.get("tool_calls"):
                 entry["tool_calls"] = m.get("tool_calls")
