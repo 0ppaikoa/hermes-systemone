@@ -489,7 +489,7 @@ def self_url(entry: dict[str, Any]) -> str:
 
 register_provider(SystemOneCustomProfile(
     name="custom",
-    aliases=("ollama", "local", "vllm", "llamacpp", "llama.cpp", "llama-cpp"),
+    aliases=(),  # 別名（ollama/vllm 等→custom）はコアの alias 表が担保する（実測）
     env_vars=(),
     base_url="",
 ))
