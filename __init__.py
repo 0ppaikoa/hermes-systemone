@@ -5,12 +5,16 @@ vendors and self-hosted servers speak it, and it never generates text, so this
 plugin:
 
 - sends the OpenAI-shaped conversation history as the `state` (shape from
-  `providers.<name>.state`), see `state.py`,
-- assembles questions from `providers.<name>.questions`; missing settings are
+  `providers.<name>.models.<task>.state`), see `state.py`,
+- assembles questions from `models.<task>.questions`; missing settings are
   errors, not silent defaults,
 - re-assembles the returned `answers` into an assistant message through the
-  projection expression in `providers.<name>.response.expression`, see
+  projection expression in `models.<task>.response.expression`, see
   `expression.py`.
+
+One provider entry serves one endpoint. Each task lives under `models.<name>`,
+where the key is the name callers pass as `model=` and `base_model` is the id
+the endpoint serves; several tasks may share one `base_model`.
 
 No core changes. Design notes: systemone-provider-design.md (AokiApp,
 2026-11-09). Layout: `state.py` (conversation -> state), `expression.py`
