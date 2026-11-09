@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .client import SystemOneClient, _norm_url, _v1_base
+from .client import SystemOneClient, _norm_url
 
 # the bundled module holds an instance; the override class inherits its class.
 # `plugins.model_providers.custom` is importable here because plugin discovery
