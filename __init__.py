@@ -130,10 +130,21 @@ def _last_user_index(messages: list[dict[str, Any]]) -> int | None:
     return None
 
 
+def _json_value(content: Any) -> str:
+    """Render tool output as a JSON value: parse if valid JSON, else wrap as a JSON string."""
+    text = _content_text(content)
+    try:
+        return json.dumps(json.loads(text), ensure_ascii=False)
+    except ValueError:
+        return json.dumps(text, ensure_ascii=False)
+
+
 def _format_state_string(messages: list[dict[str, Any]], includes: dict[str, Any]) -> str:
     """OpenAI-shaped messages -> `role: content` lines. Design doc 4.1.
 
-    The latest user message is always included, regardless of `includes`.
+    The latest user message is always included, regardless of `includes`. Tool
+    calls are rendered once, on the tool result entry (name + JSON argument and
+    JSON value), so the call is never written twice.
     """
     call_map = _tool_call_index(messages)
     forced = _last_user_index(messages)
@@ -151,16 +162,11 @@ def _format_state_string(messages: list[dict[str, Any]], includes: dict[str, Any
             text = _content_text(m.get("content"))
             if text:
                 lines.append(f"assistant: {_escape(text)}")
-            for tc in m.get("tool_calls") or []:
-                fn = (tc.get("function") or {}) if isinstance(tc, dict) else {}
-                call = f"{fn.get('name')}({fn.get('arguments')})"
-                lines.append(f"tool: {_escape(call)}")
         elif role == "tool":
             if not includes.get("tool"):
                 continue
             name, args = call_map.get(str(m.get("tool_call_id") or ""), ("", ""))
-            result = _escape(_content_text(m.get("content")))
-            lines.append(f"tool: {_escape(f'{name}({args})')} => {result}")
+            lines.append(f"tool: {name}({args}) => {_json_value(m.get('content'))}")
         elif role in ("system", "user"):
             if not includes.get(role) and i != forced:
                 continue
