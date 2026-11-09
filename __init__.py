@@ -1,7 +1,7 @@
 """System 1 wire provider plugin for Hermes Agent.
 
-System 1 は判定特化 wire。TypeSafe 社が定義し、TypeSafe 公式と Ollama Cloud などが
-POST /v1/systemone で提供する。テキストを生成しないため、このプラグインは:
+System 1 は判定特化 wire。`POST /v1/systemone` を wire とする実装が複数あり、
+このプラグインはそのいずれにも接続できる。テキストを生成しないため、このプラグインは:
 
 - Hermes の履歴（OpenAI 形）を `state` に畳む。書式は `providers.<name>.state`
 - 質問を設定 `providers.<name>.questions` から組み立てる。省略はエラー
@@ -27,7 +27,7 @@ WIRE_PATH = "/systemone"
 
 
 def _v1_base(base: Any) -> str:
-    """base_url を /v1 で終わる形に正規化する。`https://ollama.com` → `https://ollama.com/v1`。"""
+    """base_url を /v1 で終わる形に正規化する。`https://example.com` → `https://example.com/v1`。"""
     base = str(base or "").strip().rstrip("/")
     return base if base.endswith("/v1") else base + "/v1"
 
@@ -421,27 +421,40 @@ class SystemOneProfile(ProviderProfile):
 
 register_transport("systemone", SystemOneTransport)
 
-# エンドポイントごとのプロファイル。設計書 §3: 同一 wire（systemone）を TypeSafe 公式と
-# Ollama Cloud など複数実装で使えるように、id を分けて登録する。設定探索
-# （_settings_for）はこの id を鍵に `providers.<id>` を読むので、config 側も同じ名前で
-# エントリを書く。認証情報の env 変数は設定の key_env が優先され、env_vars はフォールバック。
-register_provider(SystemOneProfile(
-    name="systemone",
-    aliases=("s1", "typesafe-s1"),
-    api_mode="systemone",
-    env_vars=("SYSTEMONE_API_KEY", "TYPESAFE_API_KEY"),
-    base_url="",  # 設定から取得（設計書 §2 拘束条件5）
-    auth_type="api_key",
-    supports_streaming=False,
-    fallback_models=(),
-))
-register_provider(SystemOneProfile(
-    name="systemone-ollama",
-    aliases=("ollama-s1", "systemone-ollama-cloud"),
-    api_mode="systemone",
-    env_vars=("OLLAMA_API_KEY",),
-    base_url="",
-    auth_type="api_key",
-    supports_streaming=False,
-    fallback_models=(),
-))
+
+def _register_profiles_from_config() -> None:
+    """`providers:` 配下の `api_mode: systemone` エントリをプロファイルとして動的に登録する。
+
+    エンドポイントの一覧は設定に置く（設計書 §2 拘束条件5）。プラグインは wire を
+    実装するだけで、id・URL・モデル・認証の env 変数はすべて設定から取る。設定に
+    エントリを増やせば発見に乗り、プラグインコードは変わらない。照合はエントリの
+    キー名（小文字化）とプロファイル名の一致で行う。
+    """
+    from hermes_cli.config import load_config
+
+    cfg = load_config() or {}
+    providers_cfg = cfg.get("providers")
+    if not isinstance(providers_cfg, dict):
+        return
+    for key, entry in providers_cfg.items():
+        if not isinstance(entry, dict):
+            continue
+        wire = str(entry.get("api_mode") or entry.get("transport") or "").strip().lower()
+        if wire != "systemone":
+            continue
+        pid = str(key).strip().lower()
+        if not pid:
+            continue
+        register_provider(SystemOneProfile(
+            name=pid,
+            aliases=(pid,),
+            api_mode="systemone",
+            env_vars=("SYSTEMONE_API_KEY",),
+            base_url="",  # 設定から取得（設計書 §2 拘束条件5）
+            auth_type="api_key",
+            supports_streaming=False,
+            fallback_models=(),
+        ))
+
+
+_register_profiles_from_config()
