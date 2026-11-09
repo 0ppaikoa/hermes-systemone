@@ -55,6 +55,26 @@ providers:
 More endpoints: add more entries. `api_mode: systemone` selects this protocol, so
 the plugin never changes.
 
+## State format
+
+`state.format` specifies how the thread is provided to the System 1 model.
+
+**`string`** (default) renders the thread as one `role: JSON-escaped content`
+line per message — what the model sees looks like:
+
+```
+system: You are a helpful router.
+user: I was charged twice.
+tool: get_charges({"user": "me"})
+tool: get_charges({"user": "me"}) => 2 charges: 1200, 1200
+assistant: Found it — refunding.
+user: Thanks. Please also email me a receipt.
+```
+
+**`array`** passes the thread as the OpenAI-style list of messages
+(`role` / `content` / `tool_calls` / `tool_call_id`), the same shapes the
+OpenAI API uses.
+
 ## Response expression
 
 `providers.<id>.response.expression` is a Python expression, evaluated with
@@ -79,7 +99,7 @@ The `questions` body and its answer shapes follow the System One API definition:
 | `key_env` | yes | — | env variable holding the API key |
 | `default_model` | yes | — | model name at the endpoint |
 | `api_mode` | yes | `chat_completions` | **set to `systemone`**; otherwise the entry is served by the standard OpenAI client. |
-| `state.format` | no | `string` | `string` or `array` |
+| `state.format` | no | `string` | how the thread is provided — see State format |
 | `state.includes.*` | no | all `false` | include more history; the latest user message is always sent |
 | `questions` | yes | — | [System One questions](https://docs.typesafe.ai/api/system-one) |
 | `response.expression` | yes | — | see Response expression |
