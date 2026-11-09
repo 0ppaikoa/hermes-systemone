@@ -59,10 +59,6 @@ string becomes the message content; a dict may set `content`, `tool_calls`,
 More endpoints: add more entries. `api_mode: systemone` selects this protocol, so
 the plugin never changes.
 
-## Notes
-
-Errors are surfaced, not retried. Non-streaming.
-
 ## License
 
 MIT — see [LICENSE](LICENSE).
