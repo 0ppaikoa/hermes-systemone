@@ -88,6 +88,21 @@ that surface later as an unselectable model.
 More endpoints: add more entries. `api_mode: systemone` selects this protocol, so
 the plugin never changes.
 
+## Config reference
+
+| Key | Required | Default | Notes |
+|---|---|---|---|
+| `api` | yes | — | endpoint URL |
+| `key_env` | yes | — | env variable holding the API key |
+| `api_mode` | yes | `chat_completions` | **set to `systemone`**; otherwise the entry is served by the standard OpenAI client. |
+| `discover_models` | yes | `true` | **must be `false`** — see `discover_models: false` is required |
+| `default_model` | no | — | the task used when the caller passes no `model`. |
+| `models.<name>.base_model` | yes | — | model id sent to the endpoint |
+| `models.<name>.state.format` | no | `string` | how the thread is provided — see State format |
+| `models.<name>.state.includes.*` | no | all `false` | include more history; the latest user message is always sent |
+| `models.<name>.questions` | yes | — | [System One questions](https://docs.typesafe.ai/api/system-one) |
+| `models.<name>.response.expression` | yes | — | see Response expression |
+
 ## State format
 
 `state.format` specifies how the thread is provided to the System 1 model.
@@ -122,21 +137,6 @@ what becomes the assistant message:
 
 The `questions` body and its answer shapes follow the System One API definition:
 [System One API reference](https://docs.typesafe.ai/api/system-one).
-
-## Config reference
-
-| Key | Required | Default | Notes |
-|---|---|---|---|
-| `api` | yes | — | endpoint URL |
-| `key_env` | yes | — | env variable holding the API key |
-| `api_mode` | yes | `chat_completions` | **set to `systemone`**; otherwise the entry is served by the standard OpenAI client. |
-| `discover_models` | yes | `true` | **must be `false`** — see the config section. |
-| `default_model` | no | — | the task used when the caller passes no `model`. |
-| `models.<name>.base_model` | yes | — | model id sent to the endpoint |
-| `models.<name>.state.format` | no | `string` | how the thread is provided — see State format |
-| `models.<name>.state.includes.*` | no | all `false` | include more history; the latest user message is always sent |
-| `models.<name>.questions` | yes | — | [System One questions](https://docs.typesafe.ai/api/system-one) |
-| `models.<name>.response.expression` | yes | — | see Response expression |
 
 ## Streaming
 
