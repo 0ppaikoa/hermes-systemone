@@ -1,7 +1,7 @@
 """Response assembly for the System One provider plugin.
 
 System One `answers` -> the OpenAI-shaped response Hermes expects, through a
-user-provided projection expression (`providers.<id>.response.expression`).
+user-provided projection expression (`models.<task>.response.expression`).
 """
 
 from __future__ import annotations

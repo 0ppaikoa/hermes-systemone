@@ -20,40 +20,88 @@ Needs [simpleeval](https://pypi.org/project/simpleeval/).
 
 ## Config
 
-Add a `providers:` entry with `api_mode: systemone`:
+One `providers:` entry per endpoint, with `api_mode: systemone`. Each task lives
+under `models.<name>`:
 
 ```yaml
 providers:
-  my-decider:
+  systemone:
     api: https://your-system-one-endpoint/v1
     key_env: MY_SYSTEMONE_API_KEY
-    default_model: my-model
     api_mode: systemone
-    state:
-      format: string           # string | array
-      includes:
-        system: true
-        user: true
-        assistant: true
-        tool: true
-        reasoning: false
-    questions:
-      next_action:
-        type: choice
-        instructions: "What should the agent do next?"
-        criteria:
-          reply: "Reply to the user now"
-          call_tool: "Invoke a tool"
-          done: "The task is complete"
-    response:
-      expression: >-
-        'Replying to the user' if answers.next_action.choice == 'reply'
-        else 'Task complete' if answers.next_action.choice == 'done'
-        else 'Invoking a tool'
+    discover_models: false        # required — see below
+    default_model: router         # the task used when the caller names none
+    models:
+      router:
+        base_model: my-model      # the id the endpoint serves
+        state:
+          format: string          # string | array
+          includes:
+            system: true
+            user: true
+            assistant: true
+            tool: true
+            reasoning: false
+        questions:
+          next_action:
+            type: choice
+            instructions: "What should the agent do next?"
+            criteria:
+              reply: "Reply to the user now"
+              call_tool: "Invoke a tool"
+              done: "The task is complete"
+        response:
+          expression: >-
+            'Replying to the user' if answers.next_action.choice == 'reply'
+            else 'Task complete' if answers.next_action.choice == 'done'
+            else 'Invoking a tool'
 ```
+
+The key under `models` is the name callers pass as `model=`; `base_model` is the
+id sent to the endpoint. Several tasks may share one `base_model`, so a router
+and a guard can run on the same model with different questions:
+
+```yaml
+    models:
+      router:
+        base_model: my-model
+        questions: { next_action: { ... } }
+        response: { expression: "..." }
+      guard:
+        base_model: my-model      # same model, different questions
+        questions: { harm: { ... } }
+        response: { expression: "..." }
+```
+
+`model=router` and `model=guard` reach the two tasks. A name that is not under
+`models` raises instead of answering with another task's questions, and so does a
+task without `base_model`.
+
+### `discover_models: false` is required
+
+Hermes prefers an endpoint's live `/v1/models` listing over a configured `models`
+mapping unless the mapping is an allowlist — and a mapping is not one. With
+discovery left on, the task names under `models` never reach the picker. The
+plugin refuses to build a client without `discover_models: false` rather than let
+that surface later as an unselectable model.
 
 More endpoints: add more entries. `api_mode: systemone` selects this protocol, so
 the plugin never changes.
+
+## Config reference
+
+| Key | Required | Default | Notes |
+|---|---|---|---|
+| `api` | yes | — | endpoint URL |
+| `key_env` | yes | — | env variable holding the API key |
+| `api_mode` | yes | `chat_completions` | **set to `systemone`**; otherwise the entry is served by the standard OpenAI client. |
+| `discover_models` | yes | `true` | **must be `false`** — see `discover_models: false` is required |
+| `default_model` | no | — | the task used when the caller passes no `model`. |
+| `models.<name>.base_model` | yes | — | model id sent to the endpoint |
+| `models.<name>.state.format` | no | `string` | how the thread is provided — see State format |
+| `models.<name>.state.includes.*` | no | all `false` | include more history; the latest user message is always sent |
+| `models.<name>.questions` | yes | — | [System One questions](https://docs.typesafe.ai/api/system-one) |
+| `models.<name>.response.expression` | yes | — | see Response expression |
 
 ## State format
 
@@ -76,7 +124,7 @@ OpenAI API uses.
 
 ## Response expression
 
-`providers.<id>.response.expression` is a Python expression, evaluated with
+`models.<name>.response.expression` is a Python expression, evaluated with
 [simpleeval](https://pypi.org/project/simpleeval/) on every turn. `answers` holds
 the System One response keyed by question name. What the expression returns is
 what becomes the assistant message:
@@ -89,19 +137,6 @@ what becomes the assistant message:
 
 The `questions` body and its answer shapes follow the System One API definition:
 [System One API reference](https://docs.typesafe.ai/api/system-one).
-
-## Config reference
-
-| Key | Required | Default | Notes |
-|---|---|---|---|
-| `api` | yes | — | endpoint URL |
-| `key_env` | yes | — | env variable holding the API key |
-| `default_model` | yes | — | model name at the endpoint |
-| `api_mode` | yes | `chat_completions` | **set to `systemone`**; otherwise the entry is served by the standard OpenAI client. |
-| `state.format` | no | `string` | how the thread is provided — see State format |
-| `state.includes.*` | no | all `false` | include more history; the latest user message is always sent |
-| `questions` | yes | — | [System One questions](https://docs.typesafe.ai/api/system-one) |
-| `response.expression` | yes | — | see Response expression |
 
 ## Streaming
 
