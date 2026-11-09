@@ -66,7 +66,7 @@ the plugin never changes.
 | `api` | yes | — | endpoint URL |
 | `key_env` | yes | — | env variable holding the API key |
 | `default_model` | yes | — | model name at the endpoint |
-| `api_mode` | yes | `chat_completions` | set to `systemone` |
+| `api_mode` | yes | `chat_completions` | **set to `systemone`**; otherwise the entry is served by the standard OpenAI client. |
 | `state.format` | no | `string` | `string` or `array` |
 | `state.includes.*` | no | all `false` | include more history; the latest user message is always sent |
 | `questions` | yes | — | System One questions, sent as-is |
