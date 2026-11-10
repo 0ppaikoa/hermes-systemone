@@ -1,13 +1,25 @@
 """Provider profiles for the System One provider plugin.
 
-The plugin overrides the bundled "custom" profile: a `providers:<key>` entry
-with `api_mode: systemone` resolves through Hermes' custom runtime (whose
-provider name is "custom"), and `create_client` serves the SystemOne client
-only when the entry behind the URL declares `api_mode: systemone`.
+Two registrations, because Hermes resolves a provider through different seams
+depending on who is asking:
 
-One entry per endpoint. The per-task settings live under `models.<name>` and
-are resolved per call from the `model=` the caller passes, so several tasks may
-share one endpoint and one `base_model`.
+* The bundled ``custom`` profile is overridden so a ``providers:<key>`` entry
+  with ``api_mode: systemone`` resolves through Hermes' custom runtime. That is
+  the path the **main loop** takes (``_provider_supplied_client``).
+* A second profile named after the provider id, carrying ``env_vars``, is
+  registered so the **auxiliary resolver** reaches the same ``create_client``.
+  ``_resolve_named_custom_branch`` never calls ``create_client``; only
+  ``_resolve_api_key_branch`` does, and it is reached through
+  ``PROVIDER_REGISTRY``, which mirrors only profiles that declare env vars
+  (``auth_plugin_providers._profile_row``). Without the second registration an
+  auxiliary route silently falls back to the OpenAI wire and 404s.
+
+Both profiles share ``create_client``: the entry is found by URL, so either
+registration serves any ``api_mode: systemone`` entry on that endpoint.
+
+One entry per endpoint. The per-task settings live under ``models.<name>`` and
+are resolved per call from the ``model=`` the caller passes, so several tasks may
+share one endpoint and one ``base_model``.
 """
 
 from __future__ import annotations
@@ -120,3 +132,31 @@ class SystemOneCustomProfile(CustomBaseProfile):
             settings=settings,
             **{key: value for key, value in client_kwargs.items() if key in allowed},
         )
+
+
+def make_named_profile(provider_id: str, *, key_env: str, base_url: str) -> SystemOneCustomProfile:
+    """A profile registered under *provider_id*, so the auxiliary resolver finds it.
+
+    ``PROVIDER_REGISTRY`` mirrors a plugin profile only when it declares
+    ``env_vars`` (``auth_plugin_providers._profile_row`` returns None otherwise),
+    and only a mirrored row reaches ``_resolve_api_key_branch`` — the one
+    auxiliary branch that calls ``create_client``. The bundled ``custom``
+    profile carries no env vars and is resolved by
+    ``_resolve_named_custom_branch``, which never calls ``create_client``, so the
+    auxiliary route needs this second registration.
+
+    ``create_client`` is inherited unchanged: it locates the entry by URL, so the
+    named profile serves the same ``api_mode: systemone`` endpoints the ``custom``
+    override does.
+    """
+    profile = SystemOneCustomProfile(
+        name=provider_id,
+        aliases=(),
+        env_vars=(key_env,),
+        base_url=base_url,
+        auth_type="api_key",
+    )
+    # dataclass field default (None) wins over the class attribute, so set it on
+    # the instance — the main loop reads this to skip the streaming attempt.
+    profile.supports_streaming = False
+    return profile
