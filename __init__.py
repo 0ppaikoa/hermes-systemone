@@ -19,7 +19,13 @@ the endpoint serves; several tasks may share one `base_model`.
 No core changes. Design notes: systemone-provider-design.md (AokiApp,
 2026-11-09). Layout: `state.py` (conversation -> state), `expression.py`
 (answers -> assistant message), `client.py` (HTTP), `transport.py` (identity
-transport), `profiles.py` (bundled-custom override + URL matching).
+transport), `profiles.py` (bundled-custom override + URL matching),
+`aux_route.py` (auxiliary-route wiring).
+
+`aux_route.py` closes a gap between the main loop and the auxiliary resolver:
+both build a client for a named custom provider, but only the main loop asks
+`registered_api_modes()` before deciding the wire. Without the patch an
+`api_mode: systemone` auxiliary route posts to `/v1/chat/completions`.
 """
 
 from __future__ import annotations
@@ -27,6 +33,7 @@ from __future__ import annotations
 from agent.transports import register_transport
 from providers import register_provider
 
+from . import aux_route  # noqa: F401  (installs the auxiliary-route wiring)
 from .profiles import SystemOneCustomProfile
 from .transport import SystemOneTransport
 

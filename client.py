@@ -142,6 +142,12 @@ class SystemOneClient:
 
     def __init__(self, *, api_key: str = "", base_url: Any = None, settings: dict[str, Any] | None = None,
                  default_headers: Any = None, timeout: Any = None, http_client: Any = None, **_: Any) -> None:
+        # Reaching a client construction means every host module is loaded, so
+        # this is where the auxiliary-route wiring can safely install itself
+        # when plugin discovery ran too early to do it (see aux_route.py).
+        from . import aux_route
+
+        aux_route.install()
         self.api_key = api_key
         self.base_url = _norm_url(base_url)
         self._settings = settings or {}
