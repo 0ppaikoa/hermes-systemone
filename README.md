@@ -1,8 +1,10 @@
 # hermes-systemone
 
-A [Hermes Agent](https://github.com/NousResearch/hermes-agent) model-provider plugin
-for the **System 1** decision API — a non-generative protocol served at
-`POST /v1/systemone` by several vendors and self-hosted servers.
+A [Hermes Agent](https://github.com/NousResearch/hermes-agent) plugin for the
+**System 1** decision API — a non-generative protocol served at
+`POST /v1/systemone` by several vendors and self-hosted servers. It provides the
+System 1 client as a model provider (main loop and auxiliary tasks) and as a
+`decide` tool for raw questions.
 
 System 1 models answer typed questions about a `state` — yes/no with a
 probability, a choice among criteria, a score on a rubric. They never generate
@@ -137,6 +139,63 @@ what becomes the assistant message:
 
 The `questions` body and its answer shapes follow the System One API definition:
 [System One API reference](https://docs.typesafe.ai/api/system-one).
+
+## Tool: `decide`
+
+The plugin registers a `decide` tool in the `systemone` toolset. The caller
+writes the `questions` on every call, so a model can refine a question after
+seeing the probability.
+
+```yaml
+plugins:
+  enabled:
+    - hermes-systemone
+  entries:
+    hermes-systemone:
+      endpoints:
+        ollama:
+          api: https://ollama.com/v1
+          key_env: OLLAMA_API_KEY
+      models:
+        clef27:
+          endpoint: ollama
+          base_model: clef:27b
+      default_model: clef27
+```
+
+| Argument | Meaning |
+|---|---|
+| `model` | A configured model name. Optional; `default_model` is used when omitted. |
+| `state` | The content the questions refer to: a string, object, or array. Passed through unchanged. |
+| `questions` | The raw System One questions, keyed by name. Validated before the request. |
+
+The tool returns the API's `answers` unchanged and nothing else. The API's own
+`model` and `usage` fields are not returned.
+
+Two schemas ship with the plugin:
+
+- `schemas/decide.tool.schema.json` — the model-facing parameters schema. It
+  shows the per-type shape (noul / choice / score) with `oneOf`.
+- `schemas/decide.validate.schema.json` — the strict gate. It adds the name
+  pattern, length and count limits, the both-polarity rule for noul criteria,
+  and duplicate rejection for score levels. A call that fails here raises before
+  any HTTP request is made.
+
+Enable the toolset once, with `hermes tools` or in `config.yaml`:
+
+```yaml
+toolsets:
+  - systemone
+```
+
+Notes:
+
+- The tool config lives under `plugins.entries.hermes-systemone`; the `providers:`
+  entry (`api_mode: systemone`) is a separate surface for the model-provider
+  side and is not read by the tool.
+- `box` and `assets` are out of scope for the tool. `assets` is rejected.
+- `jsonschema` is required (see `pyproject.toml`).
+- Tests: `python tests/test_decide.py`.
 
 ## Streaming
 

@@ -1,9 +1,10 @@
 [project]
 name = "hermes-systemone"
-version = "0.3.0"
+version = "0.4.0"
 description = "System One provider plugin for Hermes Agent"
 requires-python = ">=3.11"
 license = "MIT"
 dependencies = [
     "simpleeval>=1.0",
+    "jsonschema>=4.0",
 ]

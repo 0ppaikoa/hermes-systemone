@@ -16,10 +16,11 @@ One provider entry serves one endpoint. Each task lives under `models.<name>`,
 where the key is the name callers pass as `model=` and `base_model` is the id
 the endpoint serves; several tasks may share one `base_model`.
 
-No core changes. Design notes: systemone-provider-design.md (AokiApp,
-2026-11-09). Layout: `state.py` (conversation -> state), `expression.py`
+No core changes. Layout: `state.py` (conversation -> state), `expression.py`
 (answers -> assistant message), `client.py` (HTTP), `transport.py` (identity
-transport), `profiles.py` (profile registrations + URL matching).
+transport), `profiles.py` (profile registrations + URL matching), `decide.py`
+(the raw tool), `tool_config.py` (tool-side config), `schemas/` (its two
+JSON Schemas).
 
 ## Two registrations, one `create_client`
 
@@ -111,3 +112,16 @@ for _provider_id, _key_env, _base_url in _systemone_entries():
             "systemone: could not register the auxiliary profile for %r", _provider_id,
             exc_info=True,
         )
+
+
+def register(ctx) -> None:
+    """Register the ``decide`` tool (called by the plugin loader)."""
+    from .decide import DECIDE_SCHEMA, decide
+
+    ctx.register_tool(
+        name="decide",
+        toolset="systemone",
+        schema=DECIDE_SCHEMA,
+        handler=decide,
+        description="Ask typed questions about state and get raw System 1 answers.",
+    )

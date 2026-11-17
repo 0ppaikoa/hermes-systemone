@@ -1,0 +1,161 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/0ppaikoa/hermes-systemone/schemas/decide.schema.json",
+  "title": "decide",
+  "description": "Ask typed questions about state and get the raw answers back. It returns probabilities and distributions, not a verdict.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["state", "questions"],
+  "properties": {
+    "model": {
+      "type": "string",
+      "description": "A configured model name. Omit it to use default_model. The enum of names is filled in from config when the tool is registered."
+    },
+    "state": {
+      "description": "The content every question in this request refers to. Use a string for plain text, or an object / array when named fields or order matter. Object and array states are checked for size at runtime.",
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200000,
+          "pattern": "\\S"
+        },
+        {
+          "type": "object",
+          "minProperties": 1
+        },
+        {
+          "type": "array",
+          "minItems": 1
+        }
+      ]
+    },
+    "questions": {
+      "$ref": "#/$defs/questions"
+    }
+  },
+  "$defs": {
+    "questions": {
+      "description": "Named questions. The names come back as the keys of answers.",
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 32,
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9_]{0,63}$"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/question"
+      }
+    },
+    "question": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/noul"
+        },
+        {
+          "$ref": "#/$defs/choice"
+        },
+        {
+          "$ref": "#/$defs/score"
+        }
+      ]
+    },
+    "text": {
+      "description": "A non-empty string, or structured JSON. A string of only whitespace is rejected.",
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000,
+          "pattern": "\\S"
+        },
+        {
+          "type": "object",
+          "minProperties": 1
+        },
+        {
+          "type": "array",
+          "minItems": 1
+        }
+      ]
+    },
+    "noul": {
+      "description": "A yes/no question. Answers carry the probability of yes and no confidence value.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "instructions"],
+      "properties": {
+        "type": {
+          "const": "noul"
+        },
+        "instructions": {
+          "$ref": "#/$defs/text"
+        },
+        "criteria": {
+          "description": "What counts as yes and as no. If you write criteria, both sides are required.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["true", "false"],
+          "properties": {
+            "true": {
+              "$ref": "#/$defs/text"
+            },
+            "false": {
+              "$ref": "#/$defs/text"
+            }
+          }
+        }
+      }
+    },
+    "choice": {
+      "description": "Pick one option. Answers carry the chosen key, its confidence, and the full distribution.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "instructions", "criteria"],
+      "properties": {
+        "type": {
+          "const": "choice"
+        },
+        "instructions": {
+          "$ref": "#/$defs/text"
+        },
+        "criteria": {
+          "description": "Option names and what each one means. Two or more options. A null description means the name stands alone.",
+          "type": "object",
+          "minProperties": 2,
+          "maxProperties": 255,
+          "propertyNames": {
+            "minLength": 1
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/text"
+          }
+        }
+      }
+    },
+    "score": {
+      "description": "Rate against ordered levels. Answers carry the expected score, its confidence, the legend, and the distribution.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "instructions", "criteria"],
+      "properties": {
+        "type": {
+          "const": "score"
+        },
+        "instructions": {
+          "$ref": "#/$defs/text"
+        },
+        "criteria": {
+          "description": "Ordered level descriptions, lowest first. Two to ten levels, no duplicates.",
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 10,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/text"
+          }
+        }
+      }
+    }
+  }
+}

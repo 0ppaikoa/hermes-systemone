@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/0ppaikoa/hermes-systemone/schemas/decide.tool.schema.json",
+  "title": "decide",
+  "description": "Ask typed questions about state and get the raw answers back. It returns probabilities and distributions, not a verdict.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["state", "questions"],
+  "properties": {
+    "model": {
+      "type": "string",
+      "description": "Configured model name. Omit it to use the default."
+    },
+    "state": {
+      "type": ["string", "object", "array"],
+      "description": "The content the questions refer to. A string for plain text; an object or array when named fields or order matter."
+    },
+    "questions": {
+      "type": "object",
+      "minProperties": 1,
+      "description": "Named questions. The keys come back in answers.",
+      "additionalProperties": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type", "instructions"],
+            "properties": {
+              "type": {"const": "noul"},
+              "instructions": {"type": ["string", "object", "array"], "description": "The yes/no proposition."},
+              "criteria": {
+                "description": "What counts as yes and as no. Both sides or neither.",
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["true", "false"],
+                "properties": {
+                  "true": {"type": ["string", "object", "array"]},
+                  "false": {"type": ["string", "object", "array"]}
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type", "instructions", "criteria"],
+            "properties": {
+              "type": {"const": "choice"},
+              "instructions": {"type": ["string", "object", "array"], "description": "What the model should decide."},
+              "criteria": {
+                "description": "Option names and what each means. Two or more.",
+                "type": "object",
+                "minProperties": 2,
+                "additionalProperties": {"type": ["string", "object", "array"]}
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type", "instructions", "criteria"],
+            "properties": {
+              "type": {"const": "score"},
+              "instructions": {"type": ["string", "object", "array"], "description": "What the model should rate."},
+              "criteria": {
+                "description": "Ordered levels, lowest first. Two to ten.",
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 10,
+                "items": {"type": ["string", "object", "array"]}
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

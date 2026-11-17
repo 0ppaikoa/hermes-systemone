@@ -1,5 +1,7 @@
 name: hermes-systemone
-kind: model-provider
-version: 0.3.0
-description: System One provider plugin for Hermes Agent
+kind: standalone
+version: 0.4.0
+description: System One provider plugin and decide tool for Hermes Agent
 author: AokiApp
+provides_tools:
+  - decide
