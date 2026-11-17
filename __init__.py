@@ -16,8 +16,7 @@ One provider entry serves one endpoint. Each task lives under `models.<name>`,
 where the key is the name callers pass as `model=` and `base_model` is the id
 the endpoint serves; several tasks may share one `base_model`.
 
-No core changes. Design notes: systemone-provider-design.md (AokiApp,
-2026-11-09). Layout: `state.py` (conversation -> state), `expression.py`
+No core changes. Layout: `state.py` (conversation -> state), `expression.py`
 (answers -> assistant message), `client.py` (HTTP), `transport.py` (identity
 transport), `profiles.py` (profile registrations + URL matching).
 
