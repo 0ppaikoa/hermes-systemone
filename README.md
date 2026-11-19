@@ -138,6 +138,29 @@ what becomes the assistant message:
 The `questions` body and its answer shapes follow the System One API definition:
 [System One API reference](https://docs.typesafe.ai/api/system-one).
 
+## Judgment recording
+
+Opt-in: set `judgments_log` on the provider entry and every System One call
+appends one JSONL line with the judgment it made:
+
+```yaml
+providers:
+  ollama-systemone:
+    judgments_log: /var/log/systemone-judgments.jsonl
+```
+
+Each line carries `ts`, `task`, `base_model`, `verdict` (the projection
+expression's result), `state` (what was judged), `answers` (every question's
+returned value), `usage`, and `elapsed_ms`. The answers otherwise exist only
+transiently inside the client - consumed by the projection expression and
+discarded - so a misjudged call cannot be diagnosed after the fact, and
+re-running the call returns fresh probabilistic values rather than the
+originals.
+
+Absent or empty `judgments_log` means no recording; behavior is unchanged
+for existing users. A recording failure is swallowed so observability can
+never break a judgment.
+
 ## Streaming
 
 The System One API has no streaming form. The profile declares

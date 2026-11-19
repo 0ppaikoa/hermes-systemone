@@ -26,6 +26,9 @@ sent to the endpoint. Two tasks may share one `base_model`.
 from __future__ import annotations
 
 import json
+import os
+import time
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any
 
@@ -34,6 +37,11 @@ from .expression import _assemble, _eval_expression
 from .state import _format_state
 
 API_PATH = "/systemone"
+
+# Judgment recording (opt-in): set providers.<name>.judgments_log to a file path
+# and every System One call appends one JSONL line there - the answers, the
+# verdict, and the state that was judged. Absent or empty means no recording.
+# A recording failure is swallowed so observability can never break a judgment.
 
 
 def _models_map(settings: dict[str, Any]) -> dict[str, Any]:
@@ -191,6 +199,7 @@ class SystemOneClient:
         if stream:
             raise RuntimeError("SystemOne provider: streaming is not supported (supports_streaming=False).")
 
+        _t0 = time.monotonic()
         task, config = _resolve_task(self._settings, model)
         base_model = _base_model(task, config)
         _require_settings(config, part="questions", task=task)
@@ -225,4 +234,34 @@ class SystemOneClient:
         expression = (config.get("response") or {}).get("expression")
         answers = data.get("answers") or {}
         result = _eval_expression(str(expression).strip(), answers)
+        self._record(task=task, base_model=base_model, state=state, result=result,
+                     answers=answers, usage=data.get("usage") or {}, t0=_t0)
         return _assemble(result, answers, data.get("usage") or {}, base_model)
+
+    def _record(self, *, task: str, base_model: str, state: Any, result: Any,
+                answers: dict[str, Any], usage: dict[str, Any], t0: float) -> None:
+        """Append one judgment record as a JSONL line. Observability only.
+
+        The path comes from the provider entry (``judgments_log``); recording
+        is opt-in, and any failure here is swallowed so it can never break the
+        judgment it is trying to describe.
+        """
+        path = str(self._settings.get("judgments_log") or "").strip()
+        if not path:
+            return
+        try:
+            record = {
+                "ts": datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
+                "task": task,
+                "base_model": base_model,
+                "verdict": result,
+                "state": state,
+                "answers": answers,
+                "usage": usage,
+                "elapsed_ms": int((time.monotonic() - t0) * 1000),
+            }
+            os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+            with open(path, "a", encoding="utf-8") as fh:
+                fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+        except Exception:
+            pass
